@@ -222,6 +222,3 @@ Confirm Ollama is running, the model is pulled, the base URL is correct, and `OL
 
 Pull requests are welcome. Keep changes focused, run the checks above, and avoid committing generated files or secrets.
 
-## License
-
-No license has been declared yet. Add a `LICENSE` file before publishing if you want others to use, modify, or redistribute the project.
