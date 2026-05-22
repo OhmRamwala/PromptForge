@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/vite.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>PromptForge</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+      tailwind.config = {
+        theme: {
+          extend: {
+            colors: {
+              'sentinel-bg': '#0A0E14',
+              'sentinel-surface': '#121820',
+              'sentinel-border': '#2A3340',
+              'sentinel-primary': '#00A9FF',
+              'sentinel-accent': '#FF4D00',
+              'sentinel-text-primary': '#E1E8F0',
+              'sentinel-text-secondary': '#8A99AB',
+            },
+            keyframes: {
+              'dot-pulse': {
+                '0%, 100%': { opacity: '0.2', transform: 'scale(0.8)' },
+                '50%': { opacity: '1', transform: 'scale(1.2)' },
+              },
+              'fade-in-out-text': {
+                '0%': { opacity: '0', transform: 'translateY(10px)' },
+                '20%': { opacity: '1', transform: 'translateY(0)' },
+                '80%': { opacity: '1', transform: 'translateY(0)' },
+                '100%': { opacity: '0', transform: 'translateY(-10px)' },
+              }
+            },
+            animation: {
+              'pulse-slow': 'pulse 4s cubic-bezier(0.4, 0, 0.6, 1) infinite',
+              'dot-pulse': 'dot-pulse 1.5s cubic-bezier(0.4, 0, 0.6, 1) infinite',
+              'fade-in-out-text': 'fade-in-out-text 2.5s ease-in-out forwards',
+            }
+          }
+        }
+      }
+    </script>
+    <style>
+      /* Custom scrollbar for Webkit browsers (Chrome, Safari) */
+      .custom-scrollbar::-webkit-scrollbar {
+        width: 8px;
+      }
+      .custom-scrollbar::-webkit-scrollbar-track {
+        background: #121820; /* sentinel-surface */
+      }
+      .custom-scrollbar::-webkit-scrollbar-thumb {
+        background-color: #2A3340; /* sentinel-border */
+        border-radius: 4px;
+        border: 2px solid #121820; /* sentinel-surface */
+      }
+      .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+        background-color: #8A99AB; /* sentinel-text-secondary */
+      }
+
+      /* Custom scrollbar for Firefox */
+      .custom-scrollbar {
+        scrollbar-width: thin;
+        scrollbar-color: #2A3340 #121820;
+      }
+    </style>
+  <script type="importmap">
+{
+  "imports": {
+    "react": "https://aistudiocdn.com/react@^19.1.1",
+    "react-dom/": "https://aistudiocdn.com/react-dom@^19.1.1/",
+    "react/": "https://aistudiocdn.com/react@^19.1.1/",
+    "@google/genai": "https://aistudiocdn.com/@google/genai@^1.20.0",
+    "uuid": "https://aistudiocdn.com/uuid@^13.0.0"
+  }
+}
+</script>
+<link rel="stylesheet" href="/index.css">
+</head>
+  <body class="bg-sentinel-bg bg-gradient-to-br from-sentinel-bg to-[#121419]">
+    <div id="root"></div>
+    <script type="module" src="/index.tsx"></script>
+  </body>
+</html>

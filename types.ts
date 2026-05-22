@@ -1,0 +1,49 @@
+
+export type ModelProvider = 'gemini' | 'openai' | 'ollama' | 'anthropic';
+
+export interface ApiKeys {
+    gemini: string;
+    openAI: string;
+    ollama: string;
+    anthropic: string;
+}
+
+export interface LlmConfig {
+    provider: ModelProvider;
+    model: string;
+    temperature: number;
+    topP: number;
+    topK: number;
+}
+
+export interface Message {
+    id: string;
+    role: 'user' | 'assistant';
+    content: string;
+}
+
+export interface ToolDefinition {
+    id: string;
+    name: string;
+    description: string;
+    parameters: string;
+}
+
+export interface Session {
+    id: string;
+    name: string;
+    messages: Message[];
+    systemPrompt: string;
+    llmConfig: LlmConfig;
+    tools: ToolDefinition[];
+}
+
+export interface AttackTemplate {
+    id?: string; // Used to uniquely identify user-created templates
+    name: string;
+    description: string;
+    userPrompt: string;
+    goal?: string; // The objective for the new Adversarial Mode
+    suggestedSystemPrompts: { name: string; prompt: string }[];
+    suggestedTools?: ToolDefinition[];
+}

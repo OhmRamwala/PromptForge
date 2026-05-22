@@ -1,0 +1,384 @@
+
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import { v4 as uuidv4 } from 'uuid';
+import Header from './components/Header';
+import ControlPanel from './components/ControlPanel';
+import ChatPanel from './components/ChatPanel';
+import DefenseAnalysisPanel from './components/DefenseAnalysisPanel';
+import SessionHistoryModal from './components/SessionHistoryModal';
+import PromptDebuggerModal from './components/PromptDebuggerModal';
+import ConfirmationModal from './components/ConfirmationModal';
+import { streamLlmResponse, streamAnalysis, streamAdversarialSuggestion, generateAgentTools } from './services/llmService';
+import type { Session, Message, LlmConfig, ApiKeys, AttackTemplate, ToolDefinition } from './types';
+import { MODEL_OPTIONS, ATTACK_TEMPLATES } from './constants';
+
+const initialLlmConfig: LlmConfig = {
+    provider: 'gemini',
+    model: MODEL_OPTIONS.gemini[0],
+    temperature: 0.7,
+    topP: 0.95,
+    topK: 40,
+};
+
+const FORMAT_INSTRUCTION = `You MUST format your responses.
+- For general text, use the format 'SECTION: Title' and 'BULLET: Content'.
+- For tabular data, respond ONLY with a JSON object with this exact structure: {"type": "json_table", "data": {"headers": ["Header1"], "rows": [["Row1Col1"]]}}.
+- For bar charts, respond ONLY with a JSON object with this exact structure: {"type": "json_chart", "data": {"title": "Chart Title", "values": [{"label": "A", "value": 10}]}}.
+Do not include any other text, explanation, or markdown formatting outside of the JSON object if you are creating a table or chart.`;
+
+const createNewSession = (): Session => ({
+    id: uuidv4(),
+    name: `Session ${new Date().toLocaleString()}`,
+    messages: [],
+    systemPrompt: `You are a helpful assistant. ${FORMAT_INSTRUCTION}`,
+    llmConfig: initialLlmConfig,
+    tools: [],
+});
+
+const App: React.FC = () => {
+    // State initialization
+    const [session, setSession] = useState<Session>(createNewSession());
+    const [sessionsHistory, setSessionsHistory] = useState<Session[]>([]);
+    const [customAttackTemplates, setCustomAttackTemplates] = useState<AttackTemplate[]>([]);
+    const [apiKeys, setApiKeys] = useState<ApiKeys>({ gemini: '', openAI: '', ollama: '', anthropic: '' });
+    const [chatInput, setChatInput] = useState('');
+    const [isLoading, setIsLoading] = useState(false);
+    const [isSuggestionLoading, setIsSuggestionLoading] = useState(false);
+    const [isCacheEnabled, setCacheEnabled] = useState(true);
+    const [currentAttack, setCurrentAttack] = useState<AttackTemplate | null>(null);
+    const [isAdversarialMode, setAdversarialMode] = useState(false);
+
+    // UI state
+    const [isHistoryVisible, setHistoryVisible] = useState(false);
+    const [isDebuggerVisible, setDebuggerVisible] = useState(false);
+    const [isClearConfirmationVisible, setClearConfirmationVisible] = useState(false);
+
+    // Load state from localStorage on mount
+    useEffect(() => {
+        try {
+            const savedApiKeys = localStorage.getItem('promptforge_apiKeys');
+            if (savedApiKeys) {
+                 const parsedKeys = JSON.parse(savedApiKeys);
+                 // Merge with defaults to handle new providers
+                 setApiKeys({ gemini: '', openAI: '', ollama: '', anthropic: '', ...parsedKeys });
+            }
+
+            const savedCacheSetting = localStorage.getItem('promptforge_cacheEnabled');
+            if (savedCacheSetting) setCacheEnabled(JSON.parse(savedCacheSetting));
+            
+            const savedHistory = localStorage.getItem('promptforge_sessionsHistory');
+            if(savedHistory) setSessionsHistory(JSON.parse(savedHistory));
+
+            const savedTemplates = localStorage.getItem('promptforge_customTemplates');
+            if (savedTemplates) setCustomAttackTemplates(JSON.parse(savedTemplates));
+
+        } catch (error) {
+            console.error("Failed to load state from localStorage", error);
+        }
+    }, []);
+
+    // Save state to localStorage on change
+    useEffect(() => {
+        try {
+            localStorage.setItem('promptforge_apiKeys', JSON.stringify(apiKeys));
+        } catch (error) {
+            console.error("Failed to save API keys to localStorage", error);
+        }
+    }, [apiKeys]);
+    
+    useEffect(() => {
+        try {
+            localStorage.setItem('promptforge_cacheEnabled', JSON.stringify(isCacheEnabled));
+        } catch (error) {
+            console.error("Failed to save cache setting to localStorage", error);
+        }
+    }, [isCacheEnabled]);
+
+    useEffect(() => {
+        try {
+            localStorage.setItem('promptforge_sessionsHistory', JSON.stringify(sessionsHistory));
+        } catch (error) {
+            console.error("Failed to save session history to localStorage", error);
+        }
+    }, [sessionsHistory]);
+
+    useEffect(() => {
+        try {
+            localStorage.setItem('promptforge_customTemplates', JSON.stringify(customAttackTemplates));
+        } catch (error) {
+            console.error("Failed to save custom templates to localStorage", error);
+        }
+    }, [customAttackTemplates]);
+
+
+    const handleLlmConfigChange = (newConfig: LlmConfig) => {
+        setSession(prev => ({ ...prev, llmConfig: newConfig }));
+    };
+
+    const handleSystemPromptChange = (newPrompt: string) => {
+        setSession(prev => ({ ...prev, systemPrompt: newPrompt }));
+    };
+
+    const handleClearSession = () => {
+        if (session.messages.length > 0) {
+            setSessionsHistory(prev => [session, ...prev]);
+        }
+        setSession(createNewSession());
+        setCurrentAttack(null);
+        setChatInput('');
+        setClearConfirmationVisible(false);
+    };
+    
+    const handleSaveSession = () => {
+        if (session.messages.length === 0) return;
+
+        const historyIndex = sessionsHistory.findIndex(s => s.id === session.id);
+
+        if (historyIndex !== -1) {
+            const newHistory = [...sessionsHistory];
+            newHistory[historyIndex] = session;
+            setSessionsHistory(newHistory);
+        } else {
+            setSessionsHistory(prev => [session, ...prev]);
+        }
+    };
+    
+    const handleRestoreSession = (sessionId: string) => {
+        const sessionToRestore = sessionsHistory.find(s => s.id === sessionId);
+        if (sessionToRestore) {
+            setSession(sessionToRestore);
+            setSessionsHistory(prev => prev.filter(s => s.id !== sessionId));
+            setHistoryVisible(false);
+        }
+    };
+    
+    const handleRenameSession = (sessionId: string, newName: string) => {
+        const trimmedName = newName.trim();
+        if (!trimmedName) return;
+        setSessionsHistory(prev =>
+            prev.map(s => (s.id === sessionId ? { ...s, name: trimmedName } : s))
+        );
+    };
+
+    const handleSelectAttack = useCallback((template: AttackTemplate | null) => {
+        setCurrentAttack(template);
+        if (template) {
+            setChatInput(template.userPrompt);
+            if (template.suggestedSystemPrompts.length > 0) {
+                setSession(prev => ({ 
+                    ...prev, 
+                    systemPrompt: template.suggestedSystemPrompts[0].prompt,
+                    tools: template.suggestedTools || []
+                }));
+            } else {
+                setSession(prev => ({ ...prev, tools: template.suggestedTools || [] }));
+            }
+        } else {
+            setChatInput('');
+        }
+    }, []);
+    
+    const handleApplyDebuggerPrompt = (newPrompt: string) => {
+        handleSystemPromptChange(newPrompt);
+        setDebuggerVisible(false);
+    };
+
+    const handleSaveCustomTemplate = (template: AttackTemplate) => {
+        setCustomAttackTemplates(prev => {
+            // It's a new template if it doesn't have an ID
+            if (!template.id) {
+                 return [...prev, { ...template, id: uuidv4() }];
+            }
+            // Otherwise, it's an update
+            const index = prev.findIndex(t => t.id === template.id);
+            if (index !== -1) {
+                const newTemplates = [...prev];
+                newTemplates[index] = template;
+                return newTemplates;
+            }
+            // Failsafe in case of weird state
+            return [...prev, { ...template, id: template.id || uuidv4() }];
+        });
+    };
+
+    const handleDeleteCustomTemplate = (templateId: string) => {
+        setCustomAttackTemplates(prev => prev.filter(t => t.id !== templateId));
+    };
+
+
+    const [isGeneratingTools, setIsGeneratingTools] = useState(false);
+
+    const handleToolsChange = (newTools: ToolDefinition[]) => {
+        setSession(prev => ({ ...prev, tools: newTools }));
+    };
+
+    const handleGenerateTools = async () => {
+        if (isGeneratingTools) return;
+        setIsGeneratingTools(true);
+        try {
+            const attackName = currentAttack?.name || "Custom Attack";
+            const attackDesc = currentAttack?.description || "A user-defined security audit scenario.";
+            const tools = await generateAgentTools(attackName, attackDesc, session.systemPrompt, apiKeys);
+            setSession(prev => ({ ...prev, tools }));
+        } catch (error) {
+            console.error("Tool generation failed:", error);
+            alert("Failed to generate tools. Please check your console for details.");
+        } finally {
+            setIsGeneratingTools(false);
+        }
+    };
+
+    const handleSendMessage = async (messageContent: string) => {
+        if (!messageContent.trim() || isLoading) return;
+
+        const userMessage: Message = { id: uuidv4(), role: 'user', content: messageContent };
+        const updatedMessages = [...session.messages, userMessage];
+        
+        setSession(prev => ({ ...prev, messages: updatedMessages }));
+        setIsLoading(true);
+        setChatInput('');
+
+        // Use a timeout to allow the UI to update before the potentially blocking API call
+        setTimeout(async () => {
+            const assistantMessage: Message = { id: uuidv4(), role: 'assistant', content: '' };
+            
+            try {
+                const stream = streamLlmResponse(
+                    session.llmConfig.provider,
+                    updatedMessages,
+                    apiKeys,
+                    session.systemPrompt,
+                    session.llmConfig,
+                    isCacheEnabled,
+                    session.tools
+                );
+                
+                for await (const chunk of stream) {
+                    assistantMessage.content += chunk;
+                    setSession(prev => ({
+                        ...prev,
+                        messages: [...updatedMessages, { ...assistantMessage }]
+                    }));
+                }
+            } catch (error) {
+                console.error('LLM Error:', error);
+                assistantMessage.content = error instanceof Error ? `Error: ${error.message}` : 'An unknown error occurred.';
+                setSession(prev => ({
+                    ...prev,
+                    messages: [...updatedMessages, assistantMessage]
+                }));
+            } finally {
+                setIsLoading(false);
+            }
+        }, 0);
+    };
+
+    const handleGenerateAttackStep = async () => {
+        if (!currentAttack?.goal || isSuggestionLoading) return;
+
+        setIsSuggestionLoading(true);
+        setChatInput(''); // Clear input before streaming suggestion
+        
+        try {
+            const stream = streamAdversarialSuggestion(
+                session.messages,
+                currentAttack.goal,
+                session.systemPrompt,
+                session.tools,
+                apiKeys
+            );
+
+            for await (const chunk of stream) {
+                setChatInput(prev => prev + chunk);
+            }
+        } catch (error) {
+            console.error('Adversarial Suggestion Error:', error);
+            const errorMessage = error instanceof Error ? `Error: ${error.message}` : 'Failed to generate suggestion.';
+            setChatInput(errorMessage);
+        } finally {
+            setIsSuggestionLoading(false);
+        }
+    };
+
+
+    return (
+        <div className="flex flex-col h-screen bg-sentinel-bg text-sentinel-text-primary font-sans">
+            <Header onShowHistory={() => setHistoryVisible(true)} />
+            <main className="flex-grow grid grid-cols-1 md:grid-cols-12 gap-4 p-4 overflow-hidden">
+                <div className="md:col-span-3 h-full min-h-0">
+                    <ControlPanel
+                        session={session}
+                        apiKeys={apiKeys}
+                        chatInput={chatInput}
+                        isCacheEnabled={isCacheEnabled}
+                        currentAttack={currentAttack}
+                        isAdversarialMode={isAdversarialMode}
+                        onAdversarialModeChange={setAdversarialMode}
+                        onApiKeysChange={setApiKeys}
+                        onLlmConfigChange={handleLlmConfigChange}
+                        onSystemPromptChange={handleSystemPromptChange}
+                        onToolsChange={handleToolsChange}
+                        onGenerateTools={handleGenerateTools}
+                        isGeneratingTools={isGeneratingTools}
+                        onClearSession={() => setClearConfirmationVisible(true)}
+                        onSaveSession={handleSaveSession}
+                        onCacheToggle={setCacheEnabled}
+                        attackTemplates={ATTACK_TEMPLATES}
+                        customAttackTemplates={customAttackTemplates}
+                        onSelectAttack={handleSelectAttack}
+                        onShowDebugger={() => setDebuggerVisible(true)}
+                        onSaveCustomTemplate={handleSaveCustomTemplate}
+                        onDeleteCustomTemplate={handleDeleteCustomTemplate}
+                    />
+                </div>
+                <div className="md:col-span-6 h-full flex flex-col min-h-0">
+                    <ChatPanel
+                        session={session}
+                        chatInput={chatInput}
+                        onChatInputChange={setChatInput}
+                        onSendMessage={handleSendMessage}
+                        onGenerateAttack={handleGenerateAttackStep}
+                        isLoading={isLoading}
+                        isSuggestionLoading={isSuggestionLoading}
+                        isAdversarialMode={isAdversarialMode && !!currentAttack?.goal}
+                    />
+                </div>
+                <div className="md:col-span-3 h-full min-h-0">
+                    <DefenseAnalysisPanel
+                        messages={session.messages}
+                        streamAnalysis={(messages) => streamAnalysis(messages, apiKeys)}
+                    />
+                </div>
+            </main>
+            {isHistoryVisible && (
+                <SessionHistoryModal
+                    sessions={sessionsHistory}
+                    onClose={() => setHistoryVisible(false)}
+                    onRestore={handleRestoreSession}
+                    onRename={handleRenameSession}
+                />
+            )}
+            <PromptDebuggerModal
+                isOpen={isDebuggerVisible}
+                onClose={() => setDebuggerVisible(false)}
+                systemPrompt={session.systemPrompt}
+                userPrompt={chatInput}
+                messages={session.messages}
+                tools={session.tools}
+                onApply={handleApplyDebuggerPrompt}
+            />
+            {isClearConfirmationVisible && (
+                <ConfirmationModal
+                    isOpen={isClearConfirmationVisible}
+                    onConfirm={handleClearSession}
+                    onCancel={() => setClearConfirmationVisible(false)}
+                    title="Clear Current Session?"
+                >
+                   <p>Are you sure you want to clear the current chat session? This will move it to your session history.</p>
+                </ConfirmationModal>
+            )}
+        </div>
+    );
+};
+
+export default App;

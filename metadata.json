@@ -1,0 +1,6 @@
+{
+  "name": "PromptForge",
+  "description": "An advanced AI security toolkit for red teaming. PromptForge provides a suite of tools to deconstruct, probe, and 'break' LLM prompts and defenses against the OWASP Top 10 vulnerabilities.",
+  "requestFramePermissions": [],
+  "majorCapabilities": []
+}
